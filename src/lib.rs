@@ -8,6 +8,14 @@
 //! For more information, see
 //! [Piston-Graphics](https://github.com/pistondevelopers/graphics).
 
+#[cfg(feature = "image")]
+extern crate image;
+
+#[cfg(feature = "image")]
+use image::{DynamicImage, ImageError, RgbaImage};
+#[cfg(feature = "image")]
+use std::path::Path;
+
 pub mod ops;
 
 /// Implemented by all images to be used with generic algorithms.
@@ -219,6 +227,69 @@ pub trait CreateTexture<F>: TextureOp<F> + ImageSize + Sized {
         size: S,
         settings: &TextureSettings
     ) -> Result<Self, Self::Error>;
+
+    /// Create an empty texture.
+    fn empty(factory: &mut F, settings: &TextureSettings) -> Result<Self, Self::Error> {
+        Self::create(factory, Format::Rgba8, &[0u8; 4], [1, 1], settings)
+    }
+
+    /// Create a texture from memory alpha.
+    fn from_memory_alpha(
+        factory: &mut F,
+        buffer: &[u8],
+        width: u32,
+        height: u32,
+        settings: &TextureSettings,
+    ) -> Result<Self, Self::Error> {
+        if width == 0 || height == 0 {
+            return Self::empty(factory, settings);
+        }
+
+        let size = [width, height];
+        let buffer = ops::alpha_to_rgba8(buffer, size);
+        Self::create(factory, Format::Rgba8, &buffer, size, settings)
+    }
+
+    /// Creates a texture from image.
+    #[cfg(feature = "image")]
+    fn from_image(
+        factory: &mut F,
+        img: &RgbaImage,
+        settings: &TextureSettings,
+    ) -> Result<Self, Self::Error> {
+        let (width, height) = img.dimensions();
+        Self::from_memory_alpha(factory, img, width, height, settings)
+    }
+
+    /// Creates a texture from image stored in path.
+    #[cfg(feature = "image")]
+    fn from_path<P>(
+        factory: &mut F,
+        path: P,
+        settings: &TextureSettings,
+    ) -> Result<Self, TextureFromPathError<Self, F>>
+    where
+        P: AsRef<Path>,
+    {
+        let img = image::open(path).map_err(TextureFromPathError::ImageError)?;
+
+        let img = match img {
+            DynamicImage::ImageRgba8(img) => img,
+            img => img.to_rgba8(),
+        };
+
+        Self::from_image(factory, &img, settings).map_err(TextureFromPathError::CreateTextureError)
+    }
+}
+
+/// Error type for [`CreateTexture::from_path`].
+#[cfg(feature = "image")]
+#[derive(Debug)]
+pub enum TextureFromPathError<T: TextureOp<F>, F> {
+    /// Represents an error during opening a file and decoding it as an image.
+    ImageError(ImageError),
+    /// Represents an error during creating a texture.
+    CreateTextureError(T::Error),
 }
 
 /// Implemented by textures for updating.
